@@ -1,3 +1,5 @@
+import json
+
 ### Required Libraries ###
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -26,6 +28,59 @@ def build_validation_result(is_valid, violated_slot, message_content):
         "message": {"contentType": "PlainText", "content": message_content},
     }
 
+def validate_data(age, investment_amount,risk_level, intent_request):
+    """
+    Validates the data provided by the user.
+    """
+
+    #  age should be > 0 and < 65
+    if age is not None:
+        age = parse_int(age)
+        if age < 1:
+            return build_validation_result(
+                False,
+                'age',
+                'Your age should be between 1 and 65 to use this service.'
+                )
+        elif age > 65:
+            return build_validation_result(
+                False,
+                'age',
+                'Your age should be between 1 and 65 to use this service.'
+                )
+
+    #  investment_amount should be >= 5000
+    if investment_amount is not None:   
+        dollars = parse_int(investment_amount)
+        if dollars < 5000:
+            return build_validation_result(
+                False,
+                'investmentAmount',
+                'please provide an amount greater than or equal to 5000.'
+                )
+
+    # validate risk level
+    if risk_level is not None:
+        risk_level = risk_level.lower()
+        if risk_level not in ['none','low', 'medium','high']:
+            return build_validation_result(
+                False,
+                'riskLevel',
+                'Please select valid risk level.'
+                )
+    
+    # A True results is returned if age or amount are valid
+    return build_validation_result(True, None, None)
+
+def investment_recommendation(risk_level):
+    risk_value = {
+        'none': '100% bonds (AGG), 0% equities (SPY)',
+        'low':'60% bonds (AGG), 40% equities (SPY)',
+        'medium':'40% bonds (AGG), 60% equities (SPY)',
+        'high:': '20% bonds (AGG), 80% equities (SPY)'
+    }
+    
+    return risk_value[risk_level.lower()]
 
 ### Dialog Actions Helper Functions ###
 def get_slots(intent_request):
@@ -61,23 +116,6 @@ def delegate(session_attributes, slots):
         "sessionAttributes": session_attributes,
         "dialogAction": {"type": "Delegate", "slots": slots},
     }
-
-
-def close(session_attributes, fulfillment_state, message):
-    """
-    Defines a close slot type response.
-    """
-
-    response = {
-        "sessionAttributes": session_attributes,
-        "dialogAction": {
-            "type": "Close",
-            "fulfillmentState": fulfillment_state,
-            "message": message,
-        },
-    }
-
-    return response
 
 
 """
@@ -124,38 +162,65 @@ def recommend_portfolio(intent_request):
     risk_level = get_slots(intent_request)["riskLevel"]
     source = intent_request["invocationSource"]
 
-def validate_data(age, investmentAmount):
+# This code performs basic validation on the supplied input slots.        
+    if source == "DialogCodeHook":
+
+# Perform basic validation on the supplied input slots.
+        slots = get_slots(intent_request)
+        
+# Validates user's input using the validate_data function
+        validation_result = validate_data(age, investment_amount, risk_level, intent_request)
+        
+# Use the elicitSlot dialog action to re-prompt
+# for the first violation detected.
+        if not validation_result["isValid"]:
+            slots[validation_result["violatedSlot"]] = None  
+    
+            return elicit_slot(
+            intent_request["sessionAttributes"],
+            intent_request["currentIntent"]["name"],
+            slots,
+            validation_result["violatedSlot"],
+            validation_result["message"],)
+    
+# Fetch current session attibutes   
+        output_session_attributes = intent_request["sessionAttributes"]
+        
+        return delegate(output_session_attributes, get_slots(intent_request))
+
+
+# Return a message with the initial recommendation based on the risk level.    
+    initial_recommendation = get_investment_recommendation(risk_level)
+        
+    return close(
+            intent_request["sessionAttributes"],
+            "Fulfilled",
+            {
+                "contentType": "PlainText",
+                "content": """{} Thank you for your information;
+                based on the risk level you defined, my recommendation is to choose an investment portfolio with {}
+                """.format(
+                    first_name, initial_recommendation
+                ),
+            },
+        )
+
+def close(session_attributes, fulfillment_state, message):
     """
-    Validates the data provided by the user.
+    Defines a close slot type response.
     """
 
-    # Validate that the user is between 0-65 years old
-    if age is not None:
-                if age < 0 or age > 65:
-                    return build_validation_result(
-                    False,
-                "age",
-                "You should be 0-65 years old to use this service, "
-                "please choose different age.",
-                    )
+    response = {
+        "sessionAttributes": session_attributes,
+        "dialogAction": {
+            "type": "Close",
+            "fulfillmentState": fulfillment_state,
+            "message": message,
+        },
+    }
 
-    # Validate the investment amount, it should be > 0
-    if investmentAmount is not None:
-        investmentAmount = parse_float(
-            dollars
-        )  # Since parameters are strings it's important to cast values
-        if investmentAmount < 5000:
-            return build_validation_result(
-                False,
-                "Investment Amount",
-                "The amount to invest should be atleast $5,000. "
-                "please provide a correct amount in dollars to convert.",
-            )
-
-    # A True results is returned if age or amount are valid
-    return build_validation_result(True, None, None)
-
-
+    return response
+        
 ### Intents Dispatcher ###
 def dispatch(intent_request):
     """
